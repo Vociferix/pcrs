@@ -1,6 +1,8 @@
 use crate::{Failure, Input, PResult, Parse, Success};
 use core::marker::PhantomData;
 
+pub mod prop;
+
 pub trait UnicodeSymbol {
     fn parse_char<I>(input: I) -> PResult<char, I>
     where
@@ -11,8 +13,41 @@ pub trait UnicodeInput: Input {
     fn parse_char(self) -> PResult<char, Self>;
 }
 
+pub trait Property: core::fmt::Debug + Copy {
+    fn contains(self, ch: char) -> bool;
+}
+
 pub fn char<I: UnicodeInput>(input: I) -> PResult<char, I> {
     I::parse_char(input)
+}
+
+#[derive(Debug, Clone)]
+pub struct CharWithPropParser<P, I>(P, PhantomData<I>)
+where
+    P: Property,
+    I: UnicodeInput;
+
+impl<P, I> Parse<I> for CharWithPropParser<P, I>
+where
+    P: Property,
+    I: UnicodeInput,
+{
+    type Parsed = char;
+
+    fn parse(&self, input: I) -> PResult<char, I> {
+        match input.clone().parse_char() {
+            Ok(Success(ch, rem)) if self.0.contains(ch) => Ok(Success(ch, rem)),
+            _ => Err(Failure(input)),
+        }
+    }
+}
+
+pub const fn char_with_prop<P, I>(property: P) -> CharWithPropParser<P, I>
+where
+    P: Property,
+    I: UnicodeInput,
+{
+    CharWithPropParser(property, PhantomData)
 }
 
 impl<I> UnicodeInput for I

@@ -1,7 +1,7 @@
 use pcrs::{
     basic::{
-        all_consuming, alt, delimited, flat_map, from_ref, many0, many1, map, prefix, seq, suffix,
-        value, verify,
+        all_consuming, alt, delimited, flat_map, many0, many1, map, prefix, seq, suffix, value,
+        verify,
     },
     unicode::{char as uchar, UnicodeInput as UInput},
     PResult, PResultExt, Parse,
@@ -16,7 +16,8 @@ where
     P: Parse<I>,
     I: UInput,
 {
-    move |input| prefix(ws, from_ref(&parser)).parse(input)
+    let p = prefix(ws, parser);
+    move |input| p.parse(input)
 }
 
 fn digit<I: UInput>(input: I) -> PResult<i64, I> {
@@ -51,7 +52,7 @@ enum Op {
 }
 
 impl Op {
-    fn calc(&self, lhs: i64, rhs: i64) -> i64 {
+    fn calc(self, lhs: i64, rhs: i64) -> i64 {
         match self {
             Op::Add => lhs + rhs,
             Op::Sub => lhs - rhs,

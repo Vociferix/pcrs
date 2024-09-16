@@ -20,6 +20,10 @@ pub trait Input: Clone {
         None
     }
 
+    fn is_empty(&self) -> bool {
+        self.clone().next().is_none()
+    }
+
     fn map<F, O>(self, map_fn: F) -> impl Input<Symbol = O>
     where
         F: Clone + Fn(Self::Symbol) -> O,
@@ -95,6 +99,10 @@ impl<T: Copy> Input for &[T] {
     fn size_hint(&self) -> Option<usize> {
         Some(self.len())
     }
+
+    fn is_empty(&self) -> bool {
+        <[T]>::is_empty(*self)
+    }
 }
 
 impl Input for &str {
@@ -109,6 +117,10 @@ impl Input for &str {
 
     fn pos_eq(&self, other: &Self) -> bool {
         self.as_ptr() == other.as_ptr()
+    }
+
+    fn is_empty(&self) -> bool {
+        str::is_empty(*self)
     }
 }
 
@@ -155,5 +167,9 @@ where
         } else {
             other.input.is_none()
         }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.input.as_ref().map(I::is_empty).unwrap_or(true)
     }
 }

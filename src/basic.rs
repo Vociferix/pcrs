@@ -1,4 +1,5 @@
 use crate::{Failure, Input, PResult, PResultExt, Parse, Span, Success};
+use core::iter::FromIterator;
 use core::marker::PhantomData;
 
 pub use pcrs_macros::{alt, permutation, seq};
@@ -471,6 +472,36 @@ where
     TryMany0Parser(parser, collect_fn, PhantomData)
 }
 
+pub struct Many0CollectParser<P, C, I>(P, PhantomData<(C, I)>)
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>;
+
+impl<P, C, I> Parse<I> for Many0CollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    type Parsed = C;
+
+    fn parse(&self, mut input: I) -> PResult<C, I> {
+        let ret = C::from_iter(Many0Iter(&self.0, &mut input));
+        let _ = Many0Iter(&self.0, &mut input).count();
+        Ok(Success(ret, input))
+    }
+}
+
+pub const fn many0_collect<P, C, I>(parser: P) -> Many0CollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    Many0CollectParser(parser, PhantomData)
+}
+
 pub struct Many1Iter<'a, P, I>(&'a P, &'a mut I, &'a mut bool);
 
 impl<'a, P, I> Iterator for Many1Iter<'a, P, I>
@@ -567,6 +598,41 @@ where
     TryMany1Parser(parser, collect_fn, PhantomData)
 }
 
+pub struct Many1CollectParser<P, C, I>(P, PhantomData<(C, I)>)
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>;
+
+impl<P, C, I> Parse<I> for Many1CollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    type Parsed = C;
+
+    fn parse(&self, mut input: I) -> PResult<C, I> {
+        let mut parsed = false;
+        let orig_input = input.clone();
+        let ret = C::from_iter(Many1Iter(&self.0, &mut input, &mut parsed));
+        let _ = Many1Iter(&self.0, &mut input, &mut parsed).count();
+        if !parsed {
+            return Err(Failure(orig_input));
+        }
+        Ok(Success(ret, input))
+    }
+}
+
+pub const fn many1_collect<P, C, I>(parser: P) -> Many1CollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    Many1CollectParser(parser, PhantomData)
+}
+
 pub struct RepeatedIter<'a, P, I>(&'a P, &'a mut I, &'a mut usize);
 
 impl<'a, P, I> Iterator for RepeatedIter<'a, P, I>
@@ -590,6 +656,10 @@ where
             }
             Err(Failure(_)) => None,
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, Some(*self.2))
     }
 }
 
@@ -673,6 +743,41 @@ where
     F: for<'a> Fn(RepeatedIter<'a, P, I>) -> Option<R>,
 {
     TryRepeatedParser(parser, count, collect_fn, PhantomData)
+}
+
+pub struct RepeatedCollectParser<P, C, I>(P, usize, PhantomData<(C, I)>)
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>;
+
+impl<P, C, I> Parse<I> for RepeatedCollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    type Parsed = C;
+
+    fn parse(&self, mut input: I) -> PResult<C, I> {
+        let mut remaining = self.1;
+        let orig_input = input.clone();
+        let ret = C::from_iter(RepeatedIter(&self.0, &mut input, &mut remaining));
+        let _ = RepeatedIter(&self.0, &mut input, &mut remaining).count();
+        if remaining != 0 {
+            return Err(Failure(orig_input));
+        }
+        Ok(Success(ret, input))
+    }
+}
+
+pub const fn repeated_collect<P, C, I>(parser: P, count: usize) -> RepeatedCollectParser<P, C, I>
+where
+    P: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    RepeatedCollectParser(parser, count, PhantomData)
 }
 
 pub struct ManyUntilIter<'a, P, Q, I>(&'a P, &'a Q, &'a mut I, &'a mut Option<Q::Parsed>)
@@ -801,6 +906,48 @@ where
     TryManyUntilParser(parser, sentinel_parser, collect_fn, PhantomData)
 }
 
+pub struct ManyUntilCollectParser<P, Q, C, I>(P, Q, PhantomData<(C, I)>)
+where
+    P: Parse<I>,
+    Q: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>;
+
+impl<P, Q, C, I> Parse<I> for ManyUntilCollectParser<P, Q, C, I>
+where
+    P: Parse<I>,
+    Q: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    type Parsed = (C, Q::Parsed);
+
+    fn parse(&self, mut input: I) -> PResult<Self::Parsed, I> {
+        let mut sentinel = None;
+        let orig_input = input.clone();
+        let ret = C::from_iter(ManyUntilIter(&self.0, &self.1, &mut input, &mut sentinel));
+        let _ = ManyUntilIter(&self.0, &self.1, &mut input, &mut sentinel).count();
+        if let Some(sentinel) = sentinel {
+            Ok(Success((ret, sentinel), input))
+        } else {
+            Err(Failure(orig_input))
+        }
+    }
+}
+
+pub const fn many_until_collect<P, Q, C, I>(
+    parser: P,
+    sentinel: Q,
+) -> ManyUntilCollectParser<P, Q, C, I>
+where
+    P: Parse<I>,
+    Q: Parse<I>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    ManyUntilCollectParser(parser, sentinel, PhantomData)
+}
+
 pub struct ManyRangeIter<'a, P, I>(&'a P, Option<usize>, &'a mut I, &'a mut usize);
 
 impl<'a, P, I> Iterator for ManyRangeIter<'a, P, I>
@@ -825,6 +972,17 @@ where
             }
             Err(Failure(_)) => None,
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (
+            0,
+            if let Some(max_count) = self.1 {
+                Some(max_count - *self.3)
+            } else {
+                None
+            },
+        )
     }
 }
 
@@ -936,6 +1094,58 @@ where
     I: Input,
 {
     TryManyRangeParser(parser, range, collect_fn, PhantomData)
+}
+
+pub struct ManyRangeCollectParser<P, R, C, I>(P, R, PhantomData<(C, I)>)
+where
+    P: Parse<I>,
+    R: core::ops::RangeBounds<usize>,
+    I: Input,
+    C: FromIterator<P::Parsed>;
+
+impl<P, R, C, I> Parse<I> for ManyRangeCollectParser<P, R, C, I>
+where
+    P: Parse<I>,
+    R: core::ops::RangeBounds<usize>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    type Parsed = C;
+
+    fn parse(&self, mut input: I) -> PResult<Self::Parsed, I> {
+        let max_count = match self.1.end_bound() {
+            core::ops::Bound::Included(max_count) => Some(*max_count),
+            core::ops::Bound::Excluded(&0) => Some(0),
+            core::ops::Bound::Excluded(max_count) => Some(*max_count - 1),
+            _ => None,
+        };
+
+        let mut count = 0usize;
+        let orig_input = input.clone();
+        let ret = C::from_iter(ManyRangeIter(&self.0, max_count, &mut input, &mut count));
+        let _ = ManyRangeIter(&self.0, max_count, &mut input, &mut count).count();
+
+        match self.1.start_bound() {
+            core::ops::Bound::Included(min_count) if count < *min_count => Err(Failure(orig_input)),
+            core::ops::Bound::Excluded(min_count) if count <= *min_count => {
+                Err(Failure(orig_input))
+            }
+            _ => Ok(Success(ret, input)),
+        }
+    }
+}
+
+pub const fn many_range_collect<P, R, C, I>(
+    parser: P,
+    range: R,
+) -> ManyRangeCollectParser<P, R, C, I>
+where
+    P: Parse<I>,
+    R: core::ops::RangeBounds<usize>,
+    I: Input,
+    C: FromIterator<P::Parsed>,
+{
+    ManyRangeCollectParser(parser, range, PhantomData)
 }
 
 #[derive(Debug, Clone)]
