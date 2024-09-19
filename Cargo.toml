@@ -8,6 +8,5 @@ ascii = "1.1"
 icu_properties = "1.5"
 pcrs-macros = { path = "macros" }
 
-
 [workspace]
 members = ["macros"]

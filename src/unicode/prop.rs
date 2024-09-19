@@ -1,5 +1,5 @@
 use super::{Property, UnicodeInput};
-use crate::{Failure, PResult, Parse, Success};
+use crate::{Error, Failure, PResult, Parse, Success};
 #[allow(unused_imports)]
 use icu_properties::{self as icup, maps, sets};
 
@@ -63,11 +63,13 @@ impl<P: Property> Property for Not<P> {
 
 impl<P: Property, I: UnicodeInput> Parse<I> for Not<P> {
     type Parsed = char;
+    type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I> {
+    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
-            _ => Err(Failure(input)),
+            Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
+            Err(Failure(err, _)) => Err(Failure(err, input)),
         }
     }
 }
@@ -96,11 +98,13 @@ impl<L: Property, R: Property> Property for And<L, R> {
 
 impl<L: Property, R: Property, I: UnicodeInput> Parse<I> for And<L, R> {
     type Parsed = char;
+    type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I> {
+    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
-            _ => Err(Failure(input)),
+            Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
+            Err(Failure(err, _)) => Err(Failure(err, input)),
         }
     }
 }
@@ -137,11 +141,13 @@ impl<L: Property, R: Property> Property for Or<L, R> {
 
 impl<L: Property, R: Property, I: UnicodeInput> Parse<I> for Or<L, R> {
     type Parsed = char;
+    type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I> {
+    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
-            _ => Err(Failure(input)),
+            Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
+            Err(Failure(err, _)) => Err(Failure(err, input)),
         }
     }
 }
@@ -184,11 +190,13 @@ macro_rules! def_bool_prop {
 
         impl<I: UnicodeInput> Parse<I> for $ty {
             type Parsed = char;
+            type Error = super::Error<I>;
 
-            fn parse(&self, input: I) -> PResult<char, I> {
+            fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
                 match input.clone().parse_char() {
                     Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
-                    _ => Err(Failure(input)),
+                    Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
+                    Err(Failure(err, _)) => Err(Failure(err, input)),
                 }
             }
         }
@@ -298,11 +306,13 @@ macro_rules! def_enum_prop {
 
         impl<I: UnicodeInput> Parse<I> for $name {
             type Parsed = char;
+            type Error = super::Error<I>;
 
-            fn parse(&self, input: I) -> PResult<char, I> {
+            fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
                 match input.clone().parse_char() {
                     Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
-                    _ => Err(Failure(input)),
+                    Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
+                    Err(Failure(err, _)) => Err(Failure(err, input)),
                 }
             }
         }

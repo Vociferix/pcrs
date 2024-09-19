@@ -71,7 +71,7 @@ pub fn alt(args: TokenStream) -> TokenStream {
     let Args(args) = parse_macro_input!(args as Args);
     let Some(arg0) = args.first() else {
         return quote! {
-            { ::pcrs::basic::fail }
+            ::core::compile_error!("`alt!` requires one or more arguments")
         }
         .into();
     };
@@ -147,7 +147,8 @@ pub fn permutation(args: TokenStream) -> TokenStream {
                         __pcrs_permutation_parsed += 1;
                         continue;
                     },
-                    ::core::result::Result::Err(::pcrs::Failure(__pcrs_permutation_new_rem)) => {
+                    ::core::result::Result::Err(::pcrs::Failure(__pcrs_permutation_new_err, __pcrs_permutation_new_rem)) => {
+                        __pcrs_permutation_err = Some(__pcrs_permutation_new_err);
                         __pcrs_permutation_rem = __pcrs_permutation_new_rem;
                     },
                 }
@@ -190,12 +191,16 @@ pub fn permutation(args: TokenStream) -> TokenStream {
                 fn parse(&self, __pcrs_permutation_input: __PcrsPermutationInput) -> ::pcrs::PResult<Self::Parsed, __PcrsPermutationInput> {
                     let mut __pcrs_permutation_parsed = 0usize;
                     let mut __pcrs_permutation_rem = __pcrs_permutation_input.clone();
+                    let mut __pcrs_permutation_err = None;
                     #(#vars_init)*
 
                     while __pcrs_permutation_parsed != #count {
                         #(#parse_impls)*
                         #(#drops)*
-                        return ::core::result::Result::Err(::pcrs::Failure(__pcrs_permutation_input));
+                        return ::core::result::Result::Err(::pcrs::Failure(match __pcrs_permutation_err {
+                            Some(__pcrs_permutation_err) => __pcrs_permutation_err,
+                            None => ::core::unreachable!(),
+                        }, __pcrs_permutation_input));
                     }
 
                     ::core::result::Result::Ok(::pcrs::Success(unsafe {

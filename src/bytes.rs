@@ -1,14 +1,38 @@
-use crate::{basic::pop, Failure, Input, PResult, Parse, Success};
+use crate::{
+    basic::{map, pop},
+    Error as PError, Failure, Input, PResult, Parse, Success,
+};
 use core::marker::PhantomData;
 
+#[derive(Debug, Clone)]
+pub enum Error<I: Input> {
+    NeedMoreInput,
+    ExpectedEof(I),
+    InvalidInput(I),
+}
+
 pub trait ByteSymbol {
-    fn parse_byte<I>(input: I) -> PResult<u8, I>
+    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
     where
         I: Input<Symbol = Self>;
 }
 
 pub trait ByteInput: Input {
-    fn parse_byte(self) -> PResult<u8, Self>;
+    fn parse_byte(self) -> PResult<u8, Self, Error<Self>>;
+}
+
+impl<I: Input> crate::Error<I> for Error<I> {
+    fn need_more_input() -> Self {
+        Self::NeedMoreInput
+    }
+
+    fn expected_eof(pos: I) -> Self {
+        Self::ExpectedEof(pos)
+    }
+
+    fn invalid_input(pos: I) -> Self {
+        Self::InvalidInput(pos)
+    }
 }
 
 impl<I> ByteInput for I
@@ -16,13 +40,13 @@ where
     I: Input,
     I::Symbol: ByteSymbol,
 {
-    fn parse_byte(self) -> PResult<u8, Self> {
+    fn parse_byte(self) -> PResult<u8, Self, Error<Self>> {
         <I::Symbol as ByteSymbol>::parse_byte(self)
     }
 }
 
 impl ByteSymbol for u8 {
-    fn parse_byte<I>(input: I) -> PResult<u8, I>
+    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
     where
         I: Input<Symbol = Self>,
     {
@@ -31,11 +55,11 @@ impl ByteSymbol for u8 {
 }
 
 impl ByteSymbol for i8 {
-    fn parse_byte<I>(input: I) -> PResult<u8, I>
+    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
     where
         I: Input<Symbol = Self>,
     {
-        pop.map(|b| b as u8).parse(input)
+        const { &map(pop, |b| b as u8) }.parse(input)
     }
 }
 
@@ -51,19 +75,24 @@ where
     I: ByteInput,
 {
     type Parsed = super::Span<I>;
+    type Error = Error<I>;
 
-    fn parse(&self, input: I) -> PResult<Self::Parsed, I> {
+    fn parse(&self, input: I) -> PResult<Self::Parsed, I, Self::Error> {
         let mut expected = self.0.clone();
         let mut rem = input.clone();
 
         while let Some(ex) = expected.next() {
-            if let Ok(Success(b, new_rem)) = rem.parse_byte() {
-                if b != ex {
-                    return Err(Failure(input));
+            let tmp = rem.clone();
+            match rem.parse_byte() {
+                Ok(Success(b, new_rem)) => {
+                    if b != ex {
+                        return Err(Failure(PError::invalid_input(tmp), input));
+                    }
+                    rem = new_rem;
                 }
-                rem = new_rem;
-            } else {
-                return Err(Failure(input));
+                Err(Failure(e, _)) => {
+                    return Err(Failure(e, input));
+                }
             }
         }
 
@@ -79,26 +108,26 @@ where
     VerbatimParser(pattern, PhantomData)
 }
 
-pub fn u8<I: ByteInput>(input: I) -> PResult<u8, I> {
+pub fn u8<I: ByteInput>(input: I) -> PResult<u8, I, Error<I>> {
     I::parse_byte(input)
 }
 
-pub fn i8<I: ByteInput>(input: I) -> PResult<i8, I> {
-    const { &super::basic::map(u8, |b| b as i8) }.parse(input)
+pub fn i8<I: ByteInput>(input: I) -> PResult<i8, I, Error<I>> {
+    const { &map(u8, |b| b as i8) }.parse(input)
 }
 
 pub mod be {
-    use super::{u8, ByteInput};
+    use super::{u8, ByteInput, Error};
     use crate::{
         basic::{array, map},
         PResult, Parse,
     };
 
-    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I> {
+    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I, Error<I>> {
         const { &map(array(u8), u16::from_be_bytes) }.parse(input)
     }
 
-    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I> {
+    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2]| {
                 u32::from_be_bytes([0, b0, b1, b2])
@@ -107,11 +136,11 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I> {
+    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
         const { &map(array(u8), u32::from_be_bytes) }.parse(input)
     }
 
-    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4]| {
                 u64::from_be_bytes([0, 0, 0, b0, b1, b2, b3, b4])
@@ -120,7 +149,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
                 u64::from_be_bytes([0, 0, b0, b1, b2, b3, b4, b5])
@@ -129,7 +158,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
                 u64::from_be_bytes([0, b0, b1, b2, b3, b4, b5, b6])
@@ -138,11 +167,11 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const { &map(array(u8), u64::from_be_bytes) }.parse(input)
     }
 
-    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
                 u128::from_be_bytes([0, 0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8])
@@ -151,7 +180,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
                 u128::from_be_bytes([0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9])
@@ -160,7 +189,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 u128::from_be_bytes([0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10])
@@ -169,7 +198,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -183,7 +212,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -197,7 +226,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -211,7 +240,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -225,15 +254,15 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const { &map(array(u8), u128::from_be_bytes) }.parse(input)
     }
 
-    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I> {
+    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I, Error<I>> {
         const { &map(array(u8), i16::from_be_bytes) }.parse(input)
     }
 
-    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I> {
+    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -243,11 +272,11 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I> {
+    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
         const { &map(array(u8), i32::from_be_bytes) }.parse(input)
     }
 
-    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -257,7 +286,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -267,7 +296,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -277,11 +306,11 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const { &map(array(u8), i64::from_be_bytes) }.parse(input)
     }
 
-    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -291,7 +320,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -301,7 +330,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
@@ -311,7 +340,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -326,7 +355,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -341,7 +370,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -356,7 +385,7 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -371,31 +400,31 @@ pub mod be {
         .parse(input)
     }
 
-    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const { &map(array(u8), i128::from_be_bytes) }.parse(input)
     }
 
-    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I> {
+    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I, Error<I>> {
         const { &map(array(u8), f32::from_be_bytes) }.parse(input)
     }
 
-    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I> {
+    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I, Error<I>> {
         const { &map(array(u8), f64::from_be_bytes) }.parse(input)
     }
 }
 
 pub mod le {
-    use super::{u8, ByteInput};
+    use super::{u8, ByteInput, Error};
     use crate::{
         basic::{array, map},
         PResult, Parse,
     };
 
-    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I> {
+    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I, Error<I>> {
         const { &map(array(u8), u16::from_le_bytes) }.parse(input)
     }
 
-    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I> {
+    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2]| {
                 u32::from_le_bytes([b0, b1, b2, 0])
@@ -404,11 +433,11 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I> {
+    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
         const { &map(array(u8), u32::from_le_bytes) }.parse(input)
     }
 
-    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4]| {
                 u64::from_le_bytes([b0, b1, b2, b3, b4, 0, 0, 0])
@@ -417,7 +446,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
                 u64::from_le_bytes([b0, b1, b2, b3, b4, b5, 0, 0])
@@ -426,7 +455,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
                 u64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, 0])
@@ -435,11 +464,11 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I> {
+    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
         const { &map(array(u8), u64::from_le_bytes) }.parse(input)
     }
 
-    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
                 u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, 0, 0, 0, 0, 0, 0, 0])
@@ -448,7 +477,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
                 u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, 0, 0, 0, 0, 0, 0])
@@ -457,7 +486,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, 0, 0, 0, 0, 0])
@@ -466,7 +495,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -480,7 +509,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -494,7 +523,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -508,7 +537,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -522,15 +551,15 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I> {
+    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
         const { &map(array(u8), u128::from_le_bytes) }.parse(input)
     }
 
-    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I> {
+    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I, Error<I>> {
         const { &map(array(u8), i16::from_le_bytes) }.parse(input)
     }
 
-    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I> {
+    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2]| {
                 let s = if b2 < 0x80 { 0 } else { 0xff };
@@ -540,11 +569,11 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I> {
+    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
         const { &map(array(u8), i32::from_le_bytes) }.parse(input)
     }
 
-    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4]| {
                 let s = if b4 < 0x80 { 0 } else { 0xff };
@@ -554,7 +583,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
                 let s = if b5 < 0x80 { 0 } else { 0xff };
@@ -564,7 +593,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
                 let s = if b6 < 0x80 { 0 } else { 0xff };
@@ -574,11 +603,11 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I> {
+    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
         const { &map(array(u8), i64::from_le_bytes) }.parse(input)
     }
 
-    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
                 let s = if b8 < 0x80 { 0 } else { 0xff };
@@ -588,7 +617,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
                 let s = if b9 < 0x80 { 0 } else { 0xff };
@@ -598,7 +627,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 let s = if b10 < 0x80 { 0 } else { 0xff };
@@ -608,7 +637,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -623,7 +652,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -638,7 +667,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -653,7 +682,7 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const {
             &map(
                 array(u8),
@@ -668,15 +697,15 @@ pub mod le {
         .parse(input)
     }
 
-    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I> {
+    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
         const { &map(array(u8), i128::from_le_bytes) }.parse(input)
     }
 
-    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I> {
+    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I, Error<I>> {
         const { &map(array(u8), f32::from_le_bytes) }.parse(input)
     }
 
-    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I> {
+    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I, Error<I>> {
         const { &map(array(u8), f64::from_le_bytes) }.parse(input)
     }
 }
