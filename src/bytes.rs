@@ -1,37 +1,60 @@
 use crate::{
     basic::{map, pop},
-    Error as PError, Failure, Input, PResult, Parse, Success,
+    compile, Error as PError, Failure, Input, Parse, Success,
 };
 use core::marker::PhantomData;
 
 #[derive(Debug, Clone)]
-pub enum Error<I: Input> {
-    NeedMoreInput,
-    ExpectedEof(I),
-    InvalidInput(I),
+pub struct Error<I: Input> {
+    kind: ErrorKind,
+    pos: I,
 }
 
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorKind {
+    NeedMoreInput,
+    ExpectedEof,
+    InvalidInput,
+}
+
+pub type PResult<T, I> = super::PResult<T, I, Error<I>>;
+
 pub trait ByteSymbol {
-    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
+    fn parse_byte<I>(input: I) -> PResult<u8, I>
     where
         I: Input<Symbol = Self>;
 }
 
 pub trait ByteInput: Input {
-    fn parse_byte(self) -> PResult<u8, Self, Error<Self>>;
+    fn parse_byte(self) -> PResult<u8, Self>;
+}
+
+impl<I: Input> Error<I> {
+    pub const fn new(kind: ErrorKind, pos: I) -> Self {
+        Self { kind, pos }
+    }
+
+    pub const fn kind(&self) -> ErrorKind {
+        self.kind
+    }
 }
 
 impl<I: Input> crate::Error<I> for Error<I> {
-    fn need_more_input() -> Self {
-        Self::NeedMoreInput
+    fn need_more_input(pos: I) -> Self {
+        Self::new(ErrorKind::NeedMoreInput, pos)
     }
 
     fn expected_eof(pos: I) -> Self {
-        Self::ExpectedEof(pos)
+        Self::new(ErrorKind::ExpectedEof, pos)
     }
 
     fn invalid_input(pos: I) -> Self {
-        Self::InvalidInput(pos)
+        Self::new(ErrorKind::InvalidInput, pos)
+    }
+
+    fn position(&self) -> &I {
+        &self.pos
     }
 }
 
@@ -40,13 +63,13 @@ where
     I: Input,
     I::Symbol: ByteSymbol,
 {
-    fn parse_byte(self) -> PResult<u8, Self, Error<Self>> {
+    fn parse_byte(self) -> PResult<u8, Self> {
         <I::Symbol as ByteSymbol>::parse_byte(self)
     }
 }
 
 impl ByteSymbol for u8 {
-    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
+    fn parse_byte<I>(input: I) -> PResult<u8, I>
     where
         I: Input<Symbol = Self>,
     {
@@ -55,11 +78,11 @@ impl ByteSymbol for u8 {
 }
 
 impl ByteSymbol for i8 {
-    fn parse_byte<I>(input: I) -> PResult<u8, I, Error<I>>
+    fn parse_byte<I>(input: I) -> PResult<u8, I>
     where
         I: Input<Symbol = Self>,
     {
-        const { &map(pop, |b| b as u8) }.parse(input)
+        compile!(map(pop, |b| b as u8))(input)
     }
 }
 
@@ -77,7 +100,7 @@ where
     type Parsed = super::Span<I>;
     type Error = Error<I>;
 
-    fn parse(&self, input: I) -> PResult<Self::Parsed, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<Self::Parsed, I> {
         let mut expected = self.0.clone();
         let mut rem = input.clone();
 
@@ -108,604 +131,476 @@ where
     VerbatimParser(pattern, PhantomData)
 }
 
-pub fn u8<I: ByteInput>(input: I) -> PResult<u8, I, Error<I>> {
+pub fn u8<I: ByteInput>(input: I) -> PResult<u8, I> {
     I::parse_byte(input)
 }
 
-pub fn i8<I: ByteInput>(input: I) -> PResult<i8, I, Error<I>> {
-    const { &map(u8, |b| b as i8) }.parse(input)
+pub fn i8<I: ByteInput>(input: I) -> PResult<i8, I> {
+    compile!(map(u8, |b| b as i8))(input)
 }
 
 pub mod be {
-    use super::{u8, ByteInput, Error};
+    use super::{u8, ByteInput, PResult};
     use crate::{
         basic::{array, map},
-        PResult, Parse,
+        compile,
     };
 
-    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I, Error<I>> {
-        const { &map(array(u8), u16::from_be_bytes) }.parse(input)
+    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I> {
+        compile!(map(array(u8), u16::from_be_bytes))(input)
     }
 
-    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2]| {
-                u32::from_be_bytes([0, b0, b1, b2])
-            })
-        }
-        .parse(input)
+    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I> {
+        compile!(map(array(u8), |[b0, b1, b2]| {
+            u32::from_be_bytes([0, b0, b1, b2])
+        }))(input)
     }
 
-    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
-        const { &map(array(u8), u32::from_be_bytes) }.parse(input)
+    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I> {
+        compile!(map(array(u8), u32::from_be_bytes))(input)
     }
 
-    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4]| {
-                u64::from_be_bytes([0, 0, 0, b0, b1, b2, b3, b4])
-            })
-        }
-        .parse(input)
+    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4]| {
+            u64::from_be_bytes([0, 0, 0, b0, b1, b2, b3, b4])
+        }))(input)
     }
 
-    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
-                u64::from_be_bytes([0, 0, b0, b1, b2, b3, b4, b5])
-            })
-        }
-        .parse(input)
+    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
+            u64::from_be_bytes([0, 0, b0, b1, b2, b3, b4, b5])
+        }))(input)
     }
 
-    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
-                u64::from_be_bytes([0, b0, b1, b2, b3, b4, b5, b6])
-            })
-        }
-        .parse(input)
+    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
+            u64::from_be_bytes([0, b0, b1, b2, b3, b4, b5, b6])
+        }))(input)
     }
 
-    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const { &map(array(u8), u64::from_be_bytes) }.parse(input)
+    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), u64::from_be_bytes))(input)
     }
 
-    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
-                u128::from_be_bytes([0, 0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8])
-            })
-        }
-        .parse(input)
+    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
+            u128::from_be_bytes([0, 0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8])
+        }))(input)
     }
 
-    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
-                u128::from_be_bytes([0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9])
-            })
-        }
-        .parse(input)
+    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
+            u128::from_be_bytes([0, 0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9])
+        }))(input)
     }
 
-    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
+    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 u128::from_be_bytes([0, 0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10])
-            })
-        }
-        .parse(input)
+            }
+        ))(input)
     }
 
-    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
-                    u128::from_be_bytes([
-                        0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
+                u128::from_be_bytes([0, 0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11])
+            },
+        ))(input)
     }
 
-    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
-                    u128::from_be_bytes([
-                        0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
+                u128::from_be_bytes([
+                    0, 0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
-                    u128::from_be_bytes([
-                        0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
+                u128::from_be_bytes([
+                    0, 0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
-                    u128::from_be_bytes([
-                        0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
+                u128::from_be_bytes([
+                    0, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const { &map(array(u8), u128::from_be_bytes) }.parse(input)
+    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), u128::from_be_bytes))(input)
     }
 
-    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I, Error<I>> {
-        const { &map(array(u8), i16::from_be_bytes) }.parse(input)
+    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I> {
+        compile!(map(array(u8), i16::from_be_bytes))(input)
     }
 
-    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i32::from_be_bytes([s, b0, b1, b2])
-            })
-        }
-        .parse(input)
+    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I> {
+        compile!(map(array(u8), |[b0, b1, b2]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i32::from_be_bytes([s, b0, b1, b2])
+        }))(input)
     }
 
-    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
-        const { &map(array(u8), i32::from_be_bytes) }.parse(input)
+    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I> {
+        compile!(map(array(u8), i32::from_be_bytes))(input)
     }
 
-    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i64::from_be_bytes([s, s, s, b0, b1, b2, b3, b4])
-            })
-        }
-        .parse(input)
+    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i64::from_be_bytes([s, s, s, b0, b1, b2, b3, b4])
+        }))(input)
     }
 
-    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i64::from_be_bytes([s, s, b0, b1, b2, b3, b4, b5])
-            })
-        }
-        .parse(input)
+    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i64::from_be_bytes([s, s, b0, b1, b2, b3, b4, b5])
+        }))(input)
     }
 
-    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i64::from_be_bytes([s, b0, b1, b2, b3, b4, b5, b6])
-            })
-        }
-        .parse(input)
+    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i64::from_be_bytes([s, b0, b1, b2, b3, b4, b5, b6])
+        }))(input)
     }
 
-    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const { &map(array(u8), i64::from_be_bytes) }.parse(input)
+    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), i64::from_be_bytes))(input)
     }
 
-    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i128::from_be_bytes([s, s, s, s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8])
-            })
-        }
-        .parse(input)
+    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i128::from_be_bytes([s, s, s, s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8])
+        }))(input)
     }
 
-    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
-                let s = if b0 < 0x80 { 0 } else { 0xff };
-                i128::from_be_bytes([s, s, s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9])
-            })
-        }
-        .parse(input)
+    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
+            let s = if b0 < 0x80 { 0 } else { 0xff };
+            i128::from_be_bytes([s, s, s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9])
+        }))(input)
     }
 
-    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
+    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 let s = if b0 < 0x80 { 0 } else { 0xff };
                 i128::from_be_bytes([s, s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10])
-            })
-        }
-        .parse(input)
+            }
+        ))(input)
     }
 
-    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
-                    let s = if b0 < 0x80 { 0 } else { 0xff };
-                    i128::from_be_bytes([
-                        s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
+                let s = if b0 < 0x80 { 0 } else { 0xff };
+                i128::from_be_bytes([s, s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11])
+            },
+        ))(input)
     }
 
-    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
-                    let s = if b0 < 0x80 { 0 } else { 0xff };
-                    i128::from_be_bytes([
-                        s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
+                let s = if b0 < 0x80 { 0 } else { 0xff };
+                i128::from_be_bytes([
+                    s, s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
-                    let s = if b0 < 0x80 { 0 } else { 0xff };
-                    i128::from_be_bytes([
-                        s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
+                let s = if b0 < 0x80 { 0 } else { 0xff };
+                i128::from_be_bytes([
+                    s, s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
-                    let s = if b0 < 0x80 { 0 } else { 0xff };
-                    i128::from_be_bytes([
-                        s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
+                let s = if b0 < 0x80 { 0 } else { 0xff };
+                i128::from_be_bytes([
+                    s, b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const { &map(array(u8), i128::from_be_bytes) }.parse(input)
+    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), i128::from_be_bytes))(input)
     }
 
-    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I, Error<I>> {
-        const { &map(array(u8), f32::from_be_bytes) }.parse(input)
+    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I> {
+        compile!(map(array(u8), f32::from_be_bytes))(input)
     }
 
-    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I, Error<I>> {
-        const { &map(array(u8), f64::from_be_bytes) }.parse(input)
+    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I> {
+        compile!(map(array(u8), f64::from_be_bytes))(input)
     }
 }
 
 pub mod le {
-    use super::{u8, ByteInput, Error};
+    use super::{u8, ByteInput, PResult};
     use crate::{
         basic::{array, map},
-        PResult, Parse,
+        compile,
     };
 
-    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I, Error<I>> {
-        const { &map(array(u8), u16::from_le_bytes) }.parse(input)
+    pub fn u16<I: ByteInput>(input: I) -> PResult<u16, I> {
+        compile!(map(array(u8), u16::from_le_bytes))(input)
     }
 
-    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2]| {
-                u32::from_le_bytes([b0, b1, b2, 0])
-            })
-        }
-        .parse(input)
+    pub fn u24<I: ByteInput>(input: I) -> PResult<u32, I> {
+        compile!(map(array(u8), |[b0, b1, b2]| {
+            u32::from_le_bytes([b0, b1, b2, 0])
+        }))(input)
     }
 
-    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I, Error<I>> {
-        const { &map(array(u8), u32::from_le_bytes) }.parse(input)
+    pub fn u32<I: ByteInput>(input: I) -> PResult<u32, I> {
+        compile!(map(array(u8), u32::from_le_bytes))(input)
     }
 
-    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4]| {
-                u64::from_le_bytes([b0, b1, b2, b3, b4, 0, 0, 0])
-            })
-        }
-        .parse(input)
+    pub fn u40<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4]| {
+            u64::from_le_bytes([b0, b1, b2, b3, b4, 0, 0, 0])
+        }))(input)
     }
 
-    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
-                u64::from_le_bytes([b0, b1, b2, b3, b4, b5, 0, 0])
-            })
-        }
-        .parse(input)
+    pub fn u48<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
+            u64::from_le_bytes([b0, b1, b2, b3, b4, b5, 0, 0])
+        }))(input)
     }
 
-    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
-                u64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, 0])
-            })
-        }
-        .parse(input)
+    pub fn u56<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
+            u64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, 0])
+        }))(input)
     }
 
-    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I, Error<I>> {
-        const { &map(array(u8), u64::from_le_bytes) }.parse(input)
+    pub fn u64<I: ByteInput>(input: I) -> PResult<u64, I> {
+        compile!(map(array(u8), u64::from_le_bytes))(input)
     }
 
-    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
-                u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, 0, 0, 0, 0, 0, 0, 0])
-            })
-        }
-        .parse(input)
+    pub fn u72<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
+            u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, 0, 0, 0, 0, 0, 0, 0])
+        }))(input)
     }
 
-    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
-                u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, 0, 0, 0, 0, 0, 0])
-            })
-        }
-        .parse(input)
+    pub fn u80<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
+            u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, 0, 0, 0, 0, 0, 0])
+        }))(input)
     }
 
-    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
+    pub fn u88<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, 0, 0, 0, 0, 0])
-            })
-        }
-        .parse(input)
+            }
+        ))(input)
     }
 
-    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
-                    u128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, 0, 0, 0, 0,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u96<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
+                u128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, 0, 0, 0, 0])
+            },
+        ))(input)
     }
 
-    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
-                    u128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, 0, 0, 0,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u104<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
+                u128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, 0, 0, 0,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
-                    u128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, 0, 0,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u112<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
+                u128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, 0, 0,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
-                    u128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, 0,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn u120<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
+                u128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, 0,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I, Error<I>> {
-        const { &map(array(u8), u128::from_le_bytes) }.parse(input)
+    pub fn u128<I: ByteInput>(input: I) -> PResult<u128, I> {
+        compile!(map(array(u8), u128::from_le_bytes))(input)
     }
 
-    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I, Error<I>> {
-        const { &map(array(u8), i16::from_le_bytes) }.parse(input)
+    pub fn i16<I: ByteInput>(input: I) -> PResult<i16, I> {
+        compile!(map(array(u8), i16::from_le_bytes))(input)
     }
 
-    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2]| {
-                let s = if b2 < 0x80 { 0 } else { 0xff };
-                i32::from_le_bytes([b0, b1, b2, s])
-            })
-        }
-        .parse(input)
+    pub fn i24<I: ByteInput>(input: I) -> PResult<i32, I> {
+        compile!(map(array(u8), |[b0, b1, b2]| {
+            let s = if b2 < 0x80 { 0 } else { 0xff };
+            i32::from_le_bytes([b0, b1, b2, s])
+        }))(input)
     }
 
-    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I, Error<I>> {
-        const { &map(array(u8), i32::from_le_bytes) }.parse(input)
+    pub fn i32<I: ByteInput>(input: I) -> PResult<i32, I> {
+        compile!(map(array(u8), i32::from_le_bytes))(input)
     }
 
-    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4]| {
-                let s = if b4 < 0x80 { 0 } else { 0xff };
-                i64::from_le_bytes([b0, b1, b2, b3, b4, s, s, s])
-            })
-        }
-        .parse(input)
+    pub fn i40<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4]| {
+            let s = if b4 < 0x80 { 0 } else { 0xff };
+            i64::from_le_bytes([b0, b1, b2, b3, b4, s, s, s])
+        }))(input)
     }
 
-    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
-                let s = if b5 < 0x80 { 0 } else { 0xff };
-                i64::from_le_bytes([b0, b1, b2, b3, b4, b5, s, s])
-            })
-        }
-        .parse(input)
+    pub fn i48<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5]| {
+            let s = if b5 < 0x80 { 0 } else { 0xff };
+            i64::from_le_bytes([b0, b1, b2, b3, b4, b5, s, s])
+        }))(input)
     }
 
-    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
-                let s = if b6 < 0x80 { 0 } else { 0xff };
-                i64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, s])
-            })
-        }
-        .parse(input)
+    pub fn i56<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6]| {
+            let s = if b6 < 0x80 { 0 } else { 0xff };
+            i64::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, s])
+        }))(input)
     }
 
-    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I, Error<I>> {
-        const { &map(array(u8), i64::from_le_bytes) }.parse(input)
+    pub fn i64<I: ByteInput>(input: I) -> PResult<i64, I> {
+        compile!(map(array(u8), i64::from_le_bytes))(input)
     }
 
-    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
-                let s = if b8 < 0x80 { 0 } else { 0xff };
-                i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, s, s, s, s, s, s, s])
-            })
-        }
-        .parse(input)
+    pub fn i72<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8]| {
+            let s = if b8 < 0x80 { 0 } else { 0xff };
+            i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, s, s, s, s, s, s, s])
+        }))(input)
     }
 
-    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
-                let s = if b9 < 0x80 { 0 } else { 0xff };
-                i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, s, s, s, s, s, s])
-            })
-        }
-        .parse(input)
+    pub fn i80<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9]| {
+            let s = if b9 < 0x80 { 0 } else { 0xff };
+            i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, s, s, s, s, s, s])
+        }))(input)
     }
 
-    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(array(u8), |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
+    pub fn i88<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10]| {
                 let s = if b10 < 0x80 { 0 } else { 0xff };
                 i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, s, s, s, s, s])
-            })
-        }
-        .parse(input)
+            }
+        ))(input)
     }
 
-    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
-                    let s = if b11 < 0x80 { 0 } else { 0xff };
-                    i128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, s, s, s, s,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i96<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11]| {
+                let s = if b11 < 0x80 { 0 } else { 0xff };
+                i128::from_le_bytes([b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, s, s, s, s])
+            },
+        ))(input)
     }
 
-    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
-                    let s = if b12 < 0x80 { 0 } else { 0xff };
-                    i128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, s, s, s,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i104<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12]| {
+                let s = if b12 < 0x80 { 0 } else { 0xff };
+                i128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, s, s, s,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
-                    let s = if b13 < 0x80 { 0 } else { 0xff };
-                    i128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, s, s,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i112<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13]| {
+                let s = if b13 < 0x80 { 0 } else { 0xff };
+                i128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, s, s,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const {
-            &map(
-                array(u8),
-                |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
-                    let s = if b14 < 0x80 { 0 } else { 0xff };
-                    i128::from_le_bytes([
-                        b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, s,
-                    ])
-                },
-            )
-        }
-        .parse(input)
+    pub fn i120<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(
+            array(u8),
+            |[b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14]| {
+                let s = if b14 < 0x80 { 0 } else { 0xff };
+                i128::from_le_bytes([
+                    b0, b1, b2, b3, b4, b5, b6, b7, b8, b9, b10, b11, b12, b13, b14, s,
+                ])
+            },
+        ))(input)
     }
 
-    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I, Error<I>> {
-        const { &map(array(u8), i128::from_le_bytes) }.parse(input)
+    pub fn i128<I: ByteInput>(input: I) -> PResult<i128, I> {
+        compile!(map(array(u8), i128::from_le_bytes))(input)
     }
 
-    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I, Error<I>> {
-        const { &map(array(u8), f32::from_le_bytes) }.parse(input)
+    pub fn f32<I: ByteInput>(input: I) -> PResult<f32, I> {
+        compile!(map(array(u8), f32::from_le_bytes))(input)
     }
 
-    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I, Error<I>> {
-        const { &map(array(u8), f64::from_le_bytes) }.parse(input)
+    pub fn f64<I: ByteInput>(input: I) -> PResult<f64, I> {
+        compile!(map(array(u8), f64::from_le_bytes))(input)
     }
 }

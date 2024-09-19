@@ -3,15 +3,16 @@ use pcrs::{
         all_consuming, alt, delimited, flat_map, many0, many1, map, prefix, seq, suffix, verify,
         with_value,
     },
-    unicode::{char as uchar, Error, UnicodeInput as UInput},
-    PResult, PResultExt, Parse,
+    compile,
+    unicode::{char as uchar, Error, PResult, UnicodeInput as UInput},
+    PResultExt, Parse,
 };
 
-fn ws<I: UInput>(input: I) -> PResult<(), I, Error<I>> {
-    const { &many0(verify(uchar, |ch: &char| ch.is_whitespace()), |_| ()) }.parse(input)
+fn ws<I: UInput>(input: I) -> PResult<(), I> {
+    compile!(many0(verify(uchar, |ch: &char| ch.is_whitespace()), |_| ()))(input)
 }
 
-const fn ws_delim<P, I>(parser: P) -> impl Fn(I) -> PResult<P::Parsed, I, Error<I>>
+const fn ws_delim<P, I>(parser: P) -> impl Fn(I) -> PResult<P::Parsed, I>
 where
     P: Parse<I, Error = Error<I>>,
     I: UInput,
@@ -20,26 +21,21 @@ where
     move |input| p.parse(input)
 }
 
-fn digit<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const {
-        &map(verify(uchar, |ch: &char| *ch >= '0' && *ch <= '9'), |ch| {
-            ((ch as u32 as u8) - b'0') as i64
-        })
-    }
-    .parse(input)
+fn digit<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(map(
+        verify(uchar, |ch: &char| *ch >= '0' && *ch <= '9'),
+        |ch| { ((ch as u32 as u8) - b'0') as i64 }
+    ))(input)
 }
 
-fn number<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const {
-        &ws_delim(many1(digit, |iter| -> i64 {
-            let mut ret = 0i64;
-            for d in iter {
-                ret = (ret * 10) + d;
-            }
-            ret
-        }))
-    }
-    .parse(input)
+fn number<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(ws_delim(many1(digit, |iter| -> i64 {
+        let mut ret = 0i64;
+        for d in iter {
+            ret = (ret * 10) + d;
+        }
+        ret
+    })))(input)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -63,84 +59,87 @@ impl Op {
     }
 }
 
-fn plus<I: UInput>(input: I) -> PResult<Op, I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '+'), Op::Add)) }.parse(input)
+fn plus<I: UInput>(input: I) -> PResult<Op, I> {
+    compile!(ws_delim(with_value(
+        verify(uchar, |ch| *ch == '+'),
+        Op::Add
+    )))(input)
 }
 
-fn minus<I: UInput>(input: I) -> PResult<Op, I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '-'), Op::Sub)) }.parse(input)
+fn minus<I: UInput>(input: I) -> PResult<Op, I> {
+    compile!(ws_delim(with_value(
+        verify(uchar, |ch| *ch == '-'),
+        Op::Sub
+    )))(input)
 }
 
-fn mult<I: UInput>(input: I) -> PResult<Op, I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '*'), Op::Mul)) }.parse(input)
+fn mult<I: UInput>(input: I) -> PResult<Op, I> {
+    compile!(ws_delim(with_value(
+        verify(uchar, |ch| *ch == '*'),
+        Op::Mul
+    )))(input)
 }
 
-fn div<I: UInput>(input: I) -> PResult<Op, I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '/'), Op::Div)) }.parse(input)
+fn div<I: UInput>(input: I) -> PResult<Op, I> {
+    compile!(ws_delim(with_value(
+        verify(uchar, |ch| *ch == '/'),
+        Op::Div
+    )))(input)
 }
 
-fn modulus<I: UInput>(input: I) -> PResult<Op, I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '%'), Op::Mod)) }.parse(input)
+fn modulus<I: UInput>(input: I) -> PResult<Op, I> {
+    compile!(ws_delim(with_value(
+        verify(uchar, |ch| *ch == '%'),
+        Op::Mod
+    )))(input)
 }
 
-fn lparen<I: UInput>(input: I) -> PResult<(), I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == '('), ())) }.parse(input)
+fn lparen<I: UInput>(input: I) -> PResult<(), I> {
+    compile!(ws_delim(with_value(verify(uchar, |ch| *ch == '('), ())))(input)
 }
 
-fn rparen<I: UInput>(input: I) -> PResult<(), I, Error<I>> {
-    const { &ws_delim(with_value(verify(uchar, |ch| *ch == ')'), ())) }.parse(input)
+fn rparen<I: UInput>(input: I) -> PResult<(), I> {
+    compile!(ws_delim(with_value(verify(uchar, |ch| *ch == ')'), ())))(input)
 }
 
-fn primary_expr<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const { &alt!(number, delimited(lparen, expr, rparen)) }.parse(input)
+fn primary_expr<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(alt!(number, delimited(lparen, expr, rparen)))(input)
 }
 
-fn unary_expr<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const {
-        &alt!(
-            prefix(plus, unary_expr),
-            map(prefix(minus, unary_expr), |val| -val),
-            primary_expr,
-        )
-    }
-    .parse(input)
+fn unary_expr<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(alt!(
+        prefix(plus, unary_expr),
+        map(prefix(minus, unary_expr), |val| -val),
+        primary_expr,
+    ))(input)
 }
 
-fn term_expr<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const {
-        &flat_map(unary_expr, |init: i64| {
-            many0(seq!(alt!(mult, div, modulus), unary_expr), move |iter| {
-                let mut ret = init;
-                for (op, val) in iter {
-                    ret = op.calc(ret, val);
-                }
-                ret
-            })
+fn term_expr<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(flat_map(unary_expr, |init: i64| {
+        many0(seq!(alt!(mult, div, modulus), unary_expr), move |iter| {
+            let mut ret = init;
+            for (op, val) in iter {
+                ret = op.calc(ret, val);
+            }
+            ret
         })
-    }
-    .parse(input)
+    }))(input)
 }
 
-fn expr<I: UInput>(input: I) -> PResult<i64, I, Error<I>> {
-    const {
-        &flat_map(term_expr, |init: i64| {
-            many0(seq!(alt!(plus, minus), term_expr), move |iter| {
-                let mut ret = init;
-                for (op, val) in iter {
-                    ret = op.calc(ret, val);
-                }
-                ret
-            })
+fn expr<I: UInput>(input: I) -> PResult<i64, I> {
+    compile!(flat_map(term_expr, |init: i64| {
+        many0(seq!(alt!(plus, minus), term_expr), move |iter| {
+            let mut ret = init;
+            for (op, val) in iter {
+                ret = op.calc(ret, val);
+            }
+            ret
         })
-    }
-    .parse(input)
+    }))(input)
 }
 
 fn eval<I: UInput>(input: I) -> Result<i64, Error<I>> {
-    const { &all_consuming(suffix(expr, ws)) }
-        .parse(input)
-        .extract()
-        .0
+    compile!(all_consuming(suffix(expr, ws)))(input).extract().0
 }
 
 fn main() -> std::io::Result<()> {

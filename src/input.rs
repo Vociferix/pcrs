@@ -1,12 +1,41 @@
 use crate::{Parse, Success};
 
+/// A parsable symbol stream.
+///
+/// [`Input`] is very similar to [`Iterator`]. The key difference is that a type
+/// implementing [`Input`] must support multiple and partial passes in any
+/// combination. `pcrs` implements recursive descent parsing, which means that
+/// there is no limit to the number of symbols the parser may consume before
+/// determining that it needs to backtrack (although individual parsers may have
+/// a finite bound).
+///
+/// As such, [`Input`] is essentially an [`Iterator`] that can be cloned and can
+/// be compared with clones for positional equality.
 pub trait Input: Clone {
+    /// The symbol type this input provides a stream of.
     type Symbol;
 
+    /// Gets the next symbol in the stream.
+    ///
+    /// [`None`] indicates that the end of the input has been reached.
     fn next(&mut self) -> Option<Self::Symbol>;
 
+    /// Compares the position of two inputs for positional equality.
+    ///
+    /// If both inputs are at the same position of the stream, `true` is
+    /// returned, `false` otherwise.
     fn pos_eq(&self, other: &Self) -> bool;
 
+    /// Advances the stream by a given number of symbols.
+    ///
+    /// The number of skipped symbols is returned, which should always be equal
+    /// to `count`, unless the remaining input was less than `count` symbols.
+    /// If the returned value is not equal to `count`, the input must now be
+    /// at the end of input.
+    ///
+    /// Implementors may wish to customize this method to provide a more
+    /// performant implementation than calling [`next`](Input::next) `count`
+    /// times.
     fn advance_by(&mut self, count: usize) -> usize {
         for idx in 0..count {
             let Some(_) = self.next() else {
@@ -16,14 +45,31 @@ pub trait Input: Clone {
         count
     }
 
+    /// Returns the remaining number of symbols, if known.
+    ///
+    /// Not all input streams can easily know how many symbols they contain,
+    /// but when it is known, some parsers can use that information for
+    /// optimization.
+    ///
+    /// It is recommended that implementors customize this method if the
+    /// remaining size of the stream can be computed in constant time.
     fn size_hint(&self) -> Option<usize> {
         None
     }
 
+    /// Returns `true` if the stream is at the end of input.
+    ///
+    /// Implementors may wish to customize this method to provide a more
+    /// performant implementation. The default implementation clones the
+    /// input and checks if calling [`next`](Input::next) yeilds a value.
     fn is_empty(&self) -> bool {
         self.clone().next().is_none()
     }
 
+    /// Creates a new input stream with mapped values.
+    ///
+    /// The provided function or closure will be used by the returned
+    /// stream to transform symbols of the original stream.
     fn map<F, O>(self, map_fn: F) -> impl Input<Symbol = O>
     where
         F: Clone + Fn(Self::Symbol) -> O,

@@ -240,7 +240,7 @@ impl<I: Input, E: Error<I>> Parse<I> for TakeParser<I, E> {
     fn parse(&self, mut input: I) -> PResult<Span<I>, I, E> {
         let begin = input.clone();
         if input.advance_by(self.0) != self.0 {
-            Err(Failure(E::need_more_input(), begin))
+            Err(Failure(E::need_more_input(input), begin))
         } else {
             Ok(Success(Span::new(begin, input.clone()), input))
         }
@@ -454,7 +454,7 @@ where
         while let Some(expected) = pattern.next() {
             let tmp = input.clone();
             let Some(symb) = input.next() else {
-                return Err(Failure(E::need_more_input(), orig_input));
+                return Err(Failure(E::need_more_input(input), orig_input));
             };
             if !PartialEq::eq(&symb, &expected) {
                 return Err(Failure(E::invalid_input(tmp), orig_input));
@@ -478,7 +478,7 @@ pub fn pop<I: Input, E: Error<I>>(mut input: I) -> PResult<I::Symbol, I, E> {
     if let Some(symb) = input.next() {
         Ok(Success(symb, input))
     } else {
-        Err(Failure(E::need_more_input(), input))
+        Err(Failure(E::need_more_input(input.clone()), input))
     }
 }
 

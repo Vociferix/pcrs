@@ -11,12 +11,13 @@ pub mod unicode;
 pub use input::*;
 pub use span::*;
 
+/// A parsing error.
 pub trait Error<I: Input>: Sized {
     /// Creates an error representing the need for more input.
     ///
     /// Generic parsers will call this method to generate an error when parsing failed
     /// due to reaching the end of input.
-    fn need_more_input() -> Self;
+    fn need_more_input(pos: I) -> Self;
 
     /// Creates an error representing that the end of input was expected but not reached.
     ///
@@ -30,20 +31,58 @@ pub trait Error<I: Input>: Sized {
     /// Generic parsers will call this method to generate an error when parsing failed
     /// due to a failed verification of a symbol or parsed value.
     fn invalid_input(pos: I) -> Self;
+
+    /// Gets the input position where the error occured.
+    fn position(&self) -> &I;
 }
 
+/// Type returned by a parser when parsing succeeds.
+///
+/// [`Success`] is returned in the [`Ok`] variant of a [`PResult`] to signal that
+/// parsing succeeded. [`Success`] is a named tuple containing the parsed value
+/// (see [`Parse::Parsed`]) and the remaining unparsed input.
 #[derive(Debug, Clone)]
 pub struct Success<T, I: Input>(pub T, pub I);
 
+/// Type returned by a parser when parsing fails.
+///
+/// [`Failure`] is returned in the [`Err`] variant of a [`PResult`] to signal that
+/// parsing failed. [`Failure`] is a named tuple containing the parsing error
+/// (see [`Error`] and [`Parse::Error`]) and the input that failed to parse. The
+/// input member should always have the same position as the input that was
+/// originally provided to the parser - failure to do so is a bug, but not UB.
 #[derive(Debug, Clone)]
 pub struct Failure<E: Error<I>, I: Input>(pub E, pub I);
 
+/// The [`Result`] type returned by a parser.
+///
+/// All parsers return either a [`Success`] when parsing succeeds, or a
+/// [`Failure`] when parsing fails. The input type that is returned is the same
+/// in either case, and is the same type as was provided to the parser to parse.
+///
+/// Unlike a typical [`Result`] alias in rust, [`PResult`] has three generic
+/// parameters: The parsed value type, the input type, and the error type. Since
+/// this differs from the standard convention, the alias has a slightly different
+/// name to clearly indicate the break from convention.
 pub type PResult<T, I, E> = Result<Success<T, I>, Failure<E, I>>;
 
+/// Trait implemented by all parsers.
+///
+/// The [`Parse`] trait is where the logic of parsing is implemented. However,
+/// most `pcrs` users will not implement [`Parse`] directly. See the crate level
+/// documentation for examples of user defined parsers.
+///
+/// In addition to implementing parsing logic in [`parse`](Parse::parse),
+/// [`Parse`] provides many combinator monads. These are all also available as
+/// freestanding `const` functions in the [`basic`] module.
 pub trait Parse<I: Input>: Sized {
+    /// The value type that is produced by the parser on success.
     type Parsed: Sized;
+
+    /// The error type that is produced by the parser on failure.
     type Error: Error<I>;
 
+    /// Parses the provided input.
     fn parse(&self, input: I) -> PResult<Self::Parsed, I, Self::Error>;
 
     fn into_fn(self) -> impl Fn(I) -> PResult<Self::Parsed, I, Self::Error> {
@@ -388,6 +427,7 @@ mod sealed {
     impl<T, I: Input, E: Error<I>> Sealed for PResult<T, I, E> {}
 }
 
+/// Additional convenience methods for [`PResult`].
 pub trait PResultExt: sealed::Sealed {
     type Parsed;
     type Error: Error<Self::Input>;
@@ -504,4 +544,44 @@ impl<T, I: Input, E: Error<I>, U: Error<I> + From<E>> From<Failure<E, I>> for PR
     fn from(Failure(err, rem): Failure<E, I>) -> Self {
         Err(Failure(U::from(err), rem))
     }
+}
+
+/// Compiles a parser-combinator expression into a `const` parser.
+///
+/// This macro ensures that the provided `pcrs` parser-combinator expression
+/// is evaluated a compile time into a statically defined object implementing
+/// [`Parse`]. Even mildly complex parser-combinator expressions can incur
+/// some small, but measurable, runtime overhead associated with building the
+/// parser object on demand. This macro generally eliminates that overhead.
+///
+/// The returned parser is also wrapped in a closure for convenience, so that
+/// the parser can optionally be called like a function instead of using
+/// `.parse(...)`, which requires having [`Parse`] in scope.
+///
+/// In order for the expression to be compilable, `const fn` combinators must
+/// be used. All free-function versions of combinators from `pcrs` must be
+/// used instead of the provided methods of [`Parse`]. All free-function
+/// combinators provided by `pcrs` are `const fn`. For example,
+/// `pcrs::basic::map(my_parser, |val| val * 2)` must be used instead of
+/// `my_parser.map(|val| val * 2)`
+///
+/// # Example
+/// ```
+/// use pcrs::{
+///     basic::many0,
+///     unicode::{PResult, char}
+///     compile,
+/// };
+///
+/// fn my_parser(input: &str) -> PResult<usize, &str> {
+///     compile!(
+///         many0(char, |iter| iter.count())
+///     )(input)
+/// }
+/// ```
+#[macro_export]
+macro_rules! compile {
+    ($parser:expr) => {{
+        const { |input| $crate::Parse::parse(const { &($parser) }, input) }
+    }};
 }

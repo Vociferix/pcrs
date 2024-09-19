@@ -1,30 +1,39 @@
 // TODO: Switch to `core::ascii::Char` if it ever gets stablized
 
-use crate::{Error as PError, Failure, Input, PResult, Parse, Success};
+use crate::{compile, Error as PError, Failure, Input, Parse, Success};
 use ascii::{AsciiChar, ToAsciiChar};
 use core::marker::PhantomData;
 
 pub mod prop;
 
-#[derive(Debug, Clone)]
-pub enum Error<I: Input> {
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ErrorKind {
     NeedMoreInput,
-    ExpectedEof(I),
-    InvalidInput(I),
-    NonAsciiChar(I),
+    ExpectedEof,
+    InvalidInput,
+    NonAsciiChar,
 }
 
+#[derive(Debug, Clone)]
+pub struct Error<I: Input> {
+    kind: ErrorKind,
+    pos: I,
+}
+
+pub type PResult<T, I> = super::PResult<T, I, Error<I>>;
+
 pub trait AsciiSymbol {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = Self>;
 }
 
 pub trait AsciiInput: Input {
-    fn parse_char(self) -> PResult<AsciiChar, Self, Error<Self>>;
+    fn parse_char(self) -> PResult<AsciiChar, Self>;
 }
 
-pub fn char<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
+pub fn char<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
     I::parse_char(input)
 }
 
@@ -41,7 +50,7 @@ where
     type Parsed = super::Span<I>;
     type Error = Error<I>;
 
-    fn parse(&self, input: I) -> PResult<Self::Parsed, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<Self::Parsed, I> {
         let mut expected = self.0.clone();
         let mut rem = input.clone();
         loop {
@@ -100,7 +109,7 @@ where
     type Parsed = AsciiChar;
     type Error = Error<I>;
 
-    fn parse(&self, input: I) -> PResult<AsciiChar, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<AsciiChar, I> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.0.contains(ch) => Ok(Success(ch, rem)),
             Ok(_) => Err(Failure(PError::invalid_input(input.clone()), input)),
@@ -117,69 +126,87 @@ where
     CharWithPropParser(property, PhantomData)
 }
 
-pub fn alphabetic<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Alphabetic) }.parse(input)
+pub fn alphabetic<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Alphabetic))(input)
 }
 
-pub fn alphanumeric<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Alphanumeric) }.parse(input)
+pub fn alphanumeric<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Alphanumeric))(input)
 }
 
-pub fn blank<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Blank) }.parse(input)
+pub fn blank<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Blank))(input)
 }
 
-pub fn control<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Control) }.parse(input)
+pub fn control<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Control))(input)
 }
 
-pub fn digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Digit) }.parse(input)
+pub fn digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Digit))(input)
 }
 
-pub fn graphic<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Graphic) }.parse(input)
+pub fn graphic<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Graphic))(input)
 }
 
-pub fn hex_digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::HexDigit) }.parse(input)
+pub fn hex_digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::HexDigit))(input)
 }
 
-pub fn lowercase<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Lowercase) }.parse(input)
+pub fn lowercase<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Lowercase))(input)
 }
 
-pub fn oct_digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::OctDigit) }.parse(input)
+pub fn oct_digit<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::OctDigit))(input)
 }
 
-pub fn printable<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Printable) }.parse(input)
+pub fn printable<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Printable))(input)
 }
 
-pub fn punctuation<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Punctuation) }.parse(input)
+pub fn punctuation<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Punctuation))(input)
 }
 
-pub fn uppercase<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Uppercase) }.parse(input)
+pub fn uppercase<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Uppercase))(input)
 }
 
-pub fn whitespace<I: AsciiInput>(input: I) -> PResult<AsciiChar, I, Error<I>> {
-    const { &char_with_prop(prop::Whitespace) }.parse(input)
+pub fn whitespace<I: AsciiInput>(input: I) -> PResult<AsciiChar, I> {
+    compile!(char_with_prop(prop::Whitespace))(input)
+}
+
+impl<I: Input> Error<I> {
+    pub const fn new(kind: ErrorKind, pos: I) -> Self {
+        Self { kind, pos }
+    }
+
+    pub const fn non_ascii_char(pos: I) -> Self {
+        Self::new(ErrorKind::NonAsciiChar, pos)
+    }
+
+    pub const fn kind(&self) -> ErrorKind {
+        self.kind
+    }
 }
 
 impl<I: Input> crate::Error<I> for Error<I> {
-    fn need_more_input() -> Self {
-        Self::NeedMoreInput
+    fn need_more_input(pos: I) -> Self {
+        Self::new(ErrorKind::NeedMoreInput, pos)
     }
 
     fn expected_eof(pos: I) -> Self {
-        Self::ExpectedEof(pos)
+        Self::new(ErrorKind::ExpectedEof, pos)
     }
 
     fn invalid_input(pos: I) -> Self {
-        Self::InvalidInput(pos)
+        Self::new(ErrorKind::InvalidInput, pos)
+    }
+
+    fn position(&self) -> &I {
+        &self.pos
     }
 }
 
@@ -188,13 +215,13 @@ where
     I: Input,
     I::Symbol: AsciiSymbol,
 {
-    fn parse_char(self) -> PResult<AsciiChar, Self, Error<Self>> {
+    fn parse_char(self) -> PResult<AsciiChar, Self> {
         <I::Symbol as AsciiSymbol>::parse_char(self)
     }
 }
 
 impl AsciiSymbol for AsciiChar {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = AsciiChar>,
     {
@@ -204,7 +231,7 @@ impl AsciiSymbol for AsciiChar {
 }
 
 impl AsciiSymbol for char {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = char>,
     {
@@ -213,7 +240,7 @@ impl AsciiSymbol for char {
 }
 
 impl AsciiSymbol for i8 {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = i8>,
     {
@@ -222,7 +249,7 @@ impl AsciiSymbol for i8 {
 }
 
 impl AsciiSymbol for u8 {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = u8>,
     {
@@ -231,23 +258,26 @@ impl AsciiSymbol for u8 {
 }
 
 impl AsciiSymbol for i16 {
-    fn parse_char<I>(mut input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(mut input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = i16>,
     {
         let orig_input = input.clone();
         let Some(ch) = input.next() else {
-            return Err(Failure(Error::NeedMoreInput, orig_input));
+            return Err(Failure(Error::need_more_input(input), orig_input));
         };
         let Ok(ch) = (ch as u16).to_ascii_char() else {
-            return Err(Failure(Error::NonAsciiChar(orig_input.clone()), orig_input));
+            return Err(Failure(
+                Error::non_ascii_char(orig_input.clone()),
+                orig_input,
+            ));
         };
         Ok(Success(ch, input))
     }
 }
 
 impl AsciiSymbol for u16 {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = u16>,
     {
@@ -256,23 +286,26 @@ impl AsciiSymbol for u16 {
 }
 
 impl AsciiSymbol for i32 {
-    fn parse_char<I>(mut input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(mut input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = i32>,
     {
         let orig_input = input.clone();
         let Some(ch) = input.next() else {
-            return Err(Failure(Error::NeedMoreInput, orig_input));
+            return Err(Failure(Error::need_more_input(input), orig_input));
         };
         let Ok(ch) = (ch as u32).to_ascii_char() else {
-            return Err(Failure(Error::NonAsciiChar(orig_input.clone()), orig_input));
+            return Err(Failure(
+                Error::non_ascii_char(orig_input.clone()),
+                orig_input,
+            ));
         };
         Ok(Success(ch, input))
     }
 }
 
 impl AsciiSymbol for u32 {
-    fn parse_char<I>(input: I) -> PResult<AsciiChar, I, Error<I>>
+    fn parse_char<I>(input: I) -> PResult<AsciiChar, I>
     where
         I: Input<Symbol = u32>,
     {
@@ -280,17 +313,20 @@ impl AsciiSymbol for u32 {
     }
 }
 
-fn ascii_char<I>(mut input: I) -> PResult<AsciiChar, I, Error<I>>
+fn ascii_char<I>(mut input: I) -> PResult<AsciiChar, I>
 where
     I: Input,
     I::Symbol: ToAsciiChar,
 {
     let orig_input = input.clone();
     let Some(ch) = input.next() else {
-        return Err(Failure(Error::NeedMoreInput, orig_input));
+        return Err(Failure(Error::need_more_input(input), orig_input));
     };
     let Ok(ch) = ch.to_ascii_char() else {
-        return Err(Failure(Error::NonAsciiChar(orig_input.clone()), orig_input));
+        return Err(Failure(
+            Error::non_ascii_char(orig_input.clone()),
+            orig_input,
+        ));
     };
     Ok(Success(ch, input))
 }

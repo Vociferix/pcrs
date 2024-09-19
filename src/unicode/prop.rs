@@ -1,5 +1,5 @@
-use super::{Property, UnicodeInput};
-use crate::{Error, Failure, PResult, Parse, Success};
+use super::{PResult, Property, UnicodeInput};
+use crate::{Error, Failure, Parse, Success};
 #[allow(unused_imports)]
 use icu_properties::{self as icup, maps, sets};
 
@@ -65,7 +65,7 @@ impl<P: Property, I: UnicodeInput> Parse<I> for Not<P> {
     type Parsed = char;
     type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<char, I> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
             Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
@@ -100,7 +100,7 @@ impl<L: Property, R: Property, I: UnicodeInput> Parse<I> for And<L, R> {
     type Parsed = char;
     type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<char, I> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
             Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
@@ -143,7 +143,7 @@ impl<L: Property, R: Property, I: UnicodeInput> Parse<I> for Or<L, R> {
     type Parsed = char;
     type Error = super::Error<I>;
 
-    fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
+    fn parse(&self, input: I) -> PResult<char, I> {
         match input.clone().parse_char() {
             Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
             Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
@@ -192,7 +192,7 @@ macro_rules! def_bool_prop {
             type Parsed = char;
             type Error = super::Error<I>;
 
-            fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
+            fn parse(&self, input: I) -> PResult<char, I> {
                 match input.clone().parse_char() {
                     Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
                     Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
@@ -308,7 +308,7 @@ macro_rules! def_enum_prop {
             type Parsed = char;
             type Error = super::Error<I>;
 
-            fn parse(&self, input: I) -> PResult<char, I, Self::Error> {
+            fn parse(&self, input: I) -> PResult<char, I> {
                 match input.clone().parse_char() {
                     Ok(Success(ch, rem)) if self.contains(ch) => Ok(Success(ch, rem)),
                     Ok(_) => Err(Failure(Error::invalid_input(input.clone()), input)),
