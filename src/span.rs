@@ -1,5 +1,10 @@
 use crate::Input;
 
+/// A slice of parser input.
+///
+/// A [`Span`] represents a subset of input. Internally, a [`Span`]
+/// consists of two [`Input`] objects: one representing the start
+/// of the [`Span`] and the other other representing the end.
 #[derive(Debug, Clone)]
 pub struct Span<I: Input> {
     begin: I,
@@ -9,18 +14,17 @@ pub struct Span<I: Input> {
 impl<I: Input + Copy> Copy for Span<I> {}
 
 impl<I: Input> Span<I> {
+    /// Creates a new [`Span`] over the input between `begin` and `end`.
     pub fn new(begin: I, end: I) -> Self {
         Self { begin, end }
     }
 
-    pub fn iter(&self) -> Span<I> {
-        self.clone()
-    }
-
+    /// Gets the start position of the [`Span`].
     pub fn start(&self) -> &I {
         &self.begin
     }
 
+    /// Gets the end position of the [`Span`].
     pub fn end(&self) -> &I {
         &self.end
     }

@@ -1,5 +1,10 @@
 #![no_std]
 
+//! Parser-combinator library for Rust.
+//!
+//! `pcrs` is heavily inspired by another parser-combinator crate, `nom`. Users of the `nom` crate
+//! will find `pcrs` very familiar.
+
 mod input;
 mod span;
 
@@ -10,6 +15,16 @@ pub mod unicode;
 
 pub use input::*;
 pub use span::*;
+
+#[doc(inline)]
+pub use basic::{
+    alt, array, complete, cond, constant, delimited, either, eof, error, flat_map, from_ref, many0,
+    many0_collect, many1, many1_collect, many_range, many_range_collect, many_until,
+    many_until_collect, map, map_err, map_pres, map_res, not, opt, or_default, or_else, or_value,
+    pair, peek, permutation, pop, prefix, recognize, repeated, repeated_collect, separated, seq,
+    spanned, suffix, take, try_flat_map, try_many0, try_many1, try_many_range, try_many_until,
+    try_map, try_repeated, verbatim, verify, with, with_default, with_value,
+};
 
 /// A parsing error.
 pub trait Error<I: Input>: Sized {
@@ -71,10 +86,6 @@ pub type PResult<T, I, E> = Result<Success<T, I>, Failure<E, I>>;
 /// The [`Parse`] trait is where the logic of parsing is implemented. However,
 /// most `pcrs` users will not implement [`Parse`] directly. See the crate level
 /// documentation for examples of user defined parsers.
-///
-/// In addition to implementing parsing logic in [`parse`](Parse::parse),
-/// [`Parse`] provides many combinator monads. These are all also available as
-/// freestanding `const` functions in the [`basic`] module.
 pub trait Parse<I: Input>: Sized {
     /// The value type that is produced by the parser on success.
     type Parsed: Sized;
@@ -84,339 +95,6 @@ pub trait Parse<I: Input>: Sized {
 
     /// Parses the provided input.
     fn parse(&self, input: I) -> PResult<Self::Parsed, I, Self::Error>;
-
-    fn into_fn(self) -> impl Fn(I) -> PResult<Self::Parsed, I, Self::Error> {
-        move |input| self.parse(input)
-    }
-
-    fn as_ref<'a>(&'a self) -> basic::FromRefParser<'a, Self, I> {
-        basic::from_ref(self)
-    }
-
-    fn into_input(self, input: I) -> ParsedInput<Self, I>
-    where
-        Self: Clone,
-    {
-        ParsedInput::new(self, input)
-    }
-
-    fn map<F, R>(self, map_fn: F) -> basic::MapParser<Self, F, R, I>
-    where
-        F: Fn(Self::Parsed) -> R,
-    {
-        basic::map(self, map_fn)
-    }
-
-    fn try_map<F, R>(self, try_map_fn: F) -> basic::TryMapParser<Self, F, R, I>
-    where
-        F: Fn(Self::Parsed) -> Result<R, Self::Error>,
-    {
-        basic::try_map(self, try_map_fn)
-    }
-
-    fn map_err<F, R>(self, map_err_fn: F) -> basic::MapErrParser<Self, F, R, I>
-    where
-        F: Fn(Self::Error) -> R,
-        R: Error<I>,
-    {
-        basic::map_err(self, map_err_fn)
-    }
-
-    fn map_res<F, R, E>(self, map_res_fn: F) -> basic::MapResParser<Self, F, R, E, I>
-    where
-        F: Fn(Result<Self::Parsed, Self::Error>) -> Result<R, E>,
-        E: Error<I>,
-    {
-        basic::map_res(self, map_res_fn)
-    }
-
-    fn map_pres<F, R, E>(self, map_pres_fn: F) -> basic::MapPResParser<Self, F, R, E, I>
-    where
-        F: Fn(PResult<Self::Parsed, I, Self::Error>) -> PResult<R, I, E>,
-        E: Error<I>,
-    {
-        basic::map_pres(self, map_pres_fn)
-    }
-
-    fn with<F, T>(self, with_fn: F) -> basic::WithParser<Self, F, T, I>
-    where
-        F: Fn() -> T,
-    {
-        basic::with(self, with_fn)
-    }
-
-    fn with_default<T>(self) -> basic::WithDefaultParser<Self, T, I>
-    where
-        T: Default,
-    {
-        basic::with_default(self)
-    }
-
-    fn with_value<T>(self, value: T) -> basic::WithValueParser<Self, T, I>
-    where
-        T: Clone,
-    {
-        basic::with_value(self, value)
-    }
-
-    fn flat_map<C, R>(self, combinator: C) -> basic::FlatMapParser<Self, C, R, I>
-    where
-        C: Fn(Self::Parsed) -> R,
-        R: Parse<I, Error = Self::Error>,
-    {
-        basic::flat_map(self, combinator)
-    }
-
-    fn try_flat_map<C, R>(self, combinator: C) -> basic::TryFlatMapParser<Self, C, R, I>
-    where
-        C: Fn(Self::Parsed) -> Result<R, Self::Error>,
-        R: Parse<I, Error = Self::Error>,
-    {
-        basic::try_flat_map(self, combinator)
-    }
-
-    fn or_else<F>(self, or_else_fn: F) -> basic::OrElseParser<Self, F, I>
-    where
-        F: Fn() -> Self::Parsed,
-    {
-        basic::or_else(self, or_else_fn)
-    }
-
-    fn or_default(self) -> basic::OrDefaultParser<Self, I>
-    where
-        Self::Parsed: Default,
-    {
-        basic::or_default(self)
-    }
-
-    fn or_value(self, value: Self::Parsed) -> basic::OrValueParser<Self, I>
-    where
-        Self::Parsed: Clone,
-    {
-        basic::or_value(self, value)
-    }
-
-    fn many0<F, R>(self, collect_fn: F) -> basic::Many0Parser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::Many0Iter<'a, Self, I>) -> R,
-    {
-        basic::many0(self, collect_fn)
-    }
-
-    fn try_many0<F, R>(self, collect_fn: F) -> basic::TryMany0Parser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::Many0Iter<'a, Self, I>) -> Result<R, Self::Error>,
-    {
-        basic::try_many0(self, collect_fn)
-    }
-
-    fn many0_collect<C>(self) -> basic::Many0CollectParser<Self, C, I>
-    where
-        C: core::iter::FromIterator<Self::Parsed>,
-    {
-        basic::many0_collect(self)
-    }
-
-    fn many1<F, R>(self, collect_fn: F) -> basic::Many1Parser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::Many1Iter<'a, Self, I>) -> R,
-    {
-        basic::many1(self, collect_fn)
-    }
-
-    fn try_many1<F, R>(self, collect_fn: F) -> basic::TryMany1Parser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::Many1Iter<'a, Self, I>) -> Result<R, Self::Error>,
-    {
-        basic::try_many1(self, collect_fn)
-    }
-
-    fn many1_collect<C>(self) -> basic::Many1CollectParser<Self, C, I>
-    where
-        C: core::iter::FromIterator<Self::Parsed>,
-    {
-        basic::many1_collect(self)
-    }
-
-    fn repeated<F, R>(self, count: usize, collect_fn: F) -> basic::RepeatedParser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::RepeatedIter<'a, Self, I>) -> R,
-    {
-        basic::repeated(self, count, collect_fn)
-    }
-
-    fn try_repeated<F, R>(
-        self,
-        count: usize,
-        collect_fn: F,
-    ) -> basic::TryRepeatedParser<Self, F, R, I>
-    where
-        F: for<'a> Fn(basic::RepeatedIter<'a, Self, I>) -> Result<R, Self::Error>,
-    {
-        basic::try_repeated(self, count, collect_fn)
-    }
-
-    fn repeated_collect<C>(self, count: usize) -> basic::RepeatedCollectParser<Self, C, I>
-    where
-        C: core::iter::FromIterator<Self::Parsed>,
-    {
-        basic::repeated_collect(self, count)
-    }
-
-    fn many_until<P, F, R>(
-        self,
-        sentinel: P,
-        collect_fn: F,
-    ) -> basic::ManyUntilParser<Self, P, F, R, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        F: for<'a> Fn(basic::ManyUntilIter<'a, Self, P, I>) -> R,
-    {
-        basic::many_until(self, sentinel, collect_fn)
-    }
-
-    fn try_many_until<P, F, R>(
-        self,
-        sentinel: P,
-        collect_fn: F,
-    ) -> basic::TryManyUntilParser<Self, P, F, R, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        F: for<'a> Fn(basic::ManyUntilIter<'a, Self, P, I>) -> Result<R, Self::Error>,
-    {
-        basic::try_many_until(self, sentinel, collect_fn)
-    }
-
-    fn many_until_collect<P, C>(self, sentinel: P) -> basic::ManyUntilCollectParser<Self, P, C, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        C: core::iter::FromIterator<Self::Parsed>,
-    {
-        basic::many_until_collect(self, sentinel)
-    }
-
-    fn many_range<R, F, O>(
-        self,
-        range: R,
-        collect_fn: F,
-    ) -> basic::ManyRangeParser<Self, R, F, O, I>
-    where
-        R: core::ops::RangeBounds<usize>,
-        F: for<'a> Fn(basic::ManyRangeIter<'a, Self, I>) -> O,
-    {
-        basic::many_range(self, range, collect_fn)
-    }
-
-    fn try_many_range<R, F, O>(
-        self,
-        range: R,
-        collect_fn: F,
-    ) -> basic::TryManyRangeParser<Self, R, F, O, I>
-    where
-        R: core::ops::RangeBounds<usize>,
-        F: for<'a> Fn(basic::ManyRangeIter<'a, Self, I>) -> Result<O, Self::Error>,
-    {
-        basic::try_many_range(self, range, collect_fn)
-    }
-
-    fn many_range_collect<R, C>(self, range: R) -> basic::ManyRangeCollectParser<Self, R, C, I>
-    where
-        R: core::ops::RangeBounds<usize>,
-        C: core::iter::FromIterator<Self::Parsed>,
-    {
-        basic::many_range_collect(self, range)
-    }
-
-    fn array<const LEN: usize>(self) -> basic::ArrayParser<Self, I, LEN> {
-        basic::array(self)
-    }
-
-    fn all_consuming(self) -> basic::AllConsumingParser<Self, I> {
-        basic::all_consuming(self)
-    }
-
-    fn spanned(self) -> basic::SpannedParser<Self, I> {
-        basic::spanned(self)
-    }
-
-    fn recognize(self) -> basic::RecognizeParser<Self, I> {
-        basic::recognize(self)
-    }
-
-    fn cond(self, condition: bool) -> basic::CondParser<Self, I> {
-        basic::cond(self, condition)
-    }
-
-    fn verify<F>(self, verify_fn: F) -> basic::VerifyParser<Self, F, I>
-    where
-        F: Fn(&Self::Parsed) -> bool,
-    {
-        basic::verify(self, verify_fn)
-    }
-
-    fn not(self) -> basic::NotParser<Self, I> {
-        basic::not(self)
-    }
-
-    fn opt(self) -> basic::OptParser<Self, I> {
-        basic::opt(self)
-    }
-
-    fn peek(self) -> basic::PeekParser<Self, I> {
-        basic::peek(self)
-    }
-
-    fn or<P>(self, parser: P) -> basic::EitherParser<Self, P, I>
-    where
-        P: Parse<I, Parsed = Self::Parsed, Error = Self::Error>,
-    {
-        basic::either(self, parser)
-    }
-
-    fn then<P>(self, parser: P) -> basic::PairParser<Self, P, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-    {
-        basic::pair(self, parser)
-    }
-
-    fn prefixed_with<P>(self, prefix: P) -> basic::PrefixParser<P, Self, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-    {
-        basic::prefix(prefix, self)
-    }
-
-    fn suffixed_with<P>(self, suffix: P) -> basic::SuffixParser<Self, P, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-    {
-        basic::suffix(self, suffix)
-    }
-
-    fn delimited_with<P, S>(self, prefix: P, suffix: S) -> basic::DelimitedParser<P, Self, S, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        S: Parse<I, Error = Self::Error>,
-    {
-        basic::delimited(prefix, self, suffix)
-    }
-
-    fn separates<P, Q>(self, first: P, second: Q) -> basic::SeparatedParser<P, Self, Q, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        Q: Parse<I, Error = Self::Error>,
-    {
-        basic::separated(first, self, second)
-    }
-
-    fn separated_with<P, Q>(self, separator: P, other: Q) -> basic::SeparatedParser<Self, P, Q, I>
-    where
-        P: Parse<I, Error = Self::Error>,
-        Q: Parse<I, Error = Self::Error>,
-    {
-        basic::separated(self, separator, other)
-    }
 }
 
 mod sealed {

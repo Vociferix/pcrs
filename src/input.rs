@@ -110,6 +110,13 @@ pub trait Input: Clone {
     }
 }
 
+/// Input derived from other input by repeatedly applying a parser.
+///
+/// [`ParsedInput`] consists of an underlying input and a parser.
+/// Each symbol produced by a [`ParsedInput`] is produced by applying
+/// the parser to the inner input. After parsing a symbol, the inner
+/// input becomes the remaining unparsed inner input. The [`ParsedInput`]
+/// ends when parsing a symbol fails.
 #[derive(Debug, Clone)]
 pub struct ParsedInput<P, I>
 where
@@ -175,7 +182,11 @@ where
     P: Parse<I> + Clone,
     I: Input,
 {
-    pub fn new(parser: P, input: I) -> Self {
+    /// Creates a new [`ParsedInput`].
+    ///
+    /// The returned [`ParsedInput`] will produce symbols by repeated
+    /// applying the provided parser over the provided input.
+    pub const fn new(parser: P, input: I) -> Self {
         Self {
             parser,
             input: Some(input),

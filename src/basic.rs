@@ -1507,12 +1507,12 @@ pub fn eof<I: Input, E: Error<I>>(input: I) -> PResult<(), I, E> {
 }
 
 #[derive(Debug, Clone)]
-pub struct AllConsumingParser<P, I>(P, PhantomData<I>)
+pub struct CompleteParser<P, I>(P, PhantomData<I>)
 where
     P: Parse<I>,
     I: Input;
 
-impl<P, I> Parse<I> for AllConsumingParser<P, I>
+impl<P, I> Parse<I> for CompleteParser<P, I>
 where
     P: Parse<I>,
     I: Input,
@@ -1530,12 +1530,12 @@ where
     }
 }
 
-pub const fn all_consuming<P, I>(parser: P) -> AllConsumingParser<P, I>
+pub const fn complete<P, I>(parser: P) -> CompleteParser<P, I>
 where
     P: Parse<I>,
     I: Input,
 {
-    AllConsumingParser(parser, PhantomData)
+    CompleteParser(parser, PhantomData)
 }
 
 #[derive(Debug, Clone)]

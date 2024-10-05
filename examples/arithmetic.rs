@@ -1,11 +1,7 @@
 use pcrs::{
-    basic::{
-        all_consuming, alt, delimited, flat_map, many0, many1, map, prefix, seq, suffix, verify,
-        with_value,
-    },
-    compile,
+    alt, compile, complete, delimited, flat_map, many0, many1, map, prefix, seq, suffix,
     unicode::{char as uchar, Error, PResult, UnicodeInput as UInput},
-    PResultExt, Parse,
+    verify, with_value, PResultExt, Parse,
 };
 
 fn ws<I: UInput>(input: I) -> PResult<(), I> {
@@ -139,7 +135,7 @@ fn expr<I: UInput>(input: I) -> PResult<i64, I> {
 }
 
 fn eval<I: UInput>(input: I) -> Result<i64, Error<I>> {
-    compile!(all_consuming(suffix(expr, ws)))(input).extract().0
+    compile!(complete(suffix(expr, ws)))(input).extract().0
 }
 
 fn main() -> std::io::Result<()> {
